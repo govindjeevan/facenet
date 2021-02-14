@@ -28,10 +28,10 @@ from __future__ import division
 from __future__ import print_function
 from six import string_types, iteritems
 
+import cv2
 import numpy as np
 import tensorflow as tf
 #from math import floor
-import cv2
 import os
 
 def layer(op):
@@ -82,7 +82,7 @@ class Network(object):
         session: The current TensorFlow session
         ignore_missing: If true, serialized weights for missing layers are ignored.
         """
-        data_dict = np.load(data_path, encoding='latin1').item() #pylint: disable=no-member
+        data_dict = np.load(data_path, allow_pickle=True, encoding='latin1').item() #pylint: disable=no-member
 
         for op_name in data_dict:
             with tf.variable_scope(op_name, reuse=True):

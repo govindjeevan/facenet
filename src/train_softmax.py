@@ -49,7 +49,7 @@ def main(args):
     network = importlib.import_module(args.model_def)
     image_size = (args.image_size, args.image_size)
 
-    subdir = datetime.strftime(datetime.now(), '%Y%m%d-%H%M%S')
+    subdir = datetime.strftime(datetime.now(), '%Y-%m-%d-%H-softmax-'+args.model_def.split(".")[-1]+"-"+args.data_dir.split("/")[-1])
     log_dir = os.path.join(os.path.expanduser(args.logs_base_dir), subdir)
     if not os.path.isdir(log_dir):  # Create the log directory if it doesn't exist
         os.makedirs(log_dir)
@@ -199,7 +199,10 @@ def main(args):
 
             if pretrained_model:
                 print('Restoring pretrained model: %s' % pretrained_model)
-                saver.restore(sess, pretrained_model)
+                ckpt = tf.train.get_checkpoint_state(pretrained_model)
+                if ckpt and ckpt.model_checkpoint_path:
+                    saver.restore(sess, ckpt.model_checkpoint_path)
+
 
             # Training and validation loop
             print('Running training')
@@ -216,7 +219,8 @@ def main(args):
                 'val_xent_loss': np.zeros((nrof_val_samples,), np.float32),
                 'val_accuracy': np.zeros((nrof_val_samples,), np.float32),
                 'lfw_accuracy': np.zeros((args.max_nrof_epochs,), np.float32),
-                'lfw_valrate': np.zeros((args.max_nrof_epochs,), np.float32),
+                'lfw_valrate2': np.zeros((args.max_nrof_epochs,), np.float32),
+                'lfw_valrate3': np.zeros((args.max_nrof_epochs,), np.float32),
                 'learning_rate': np.zeros((args.max_nrof_epochs,), np.float32),
                 'time_train': np.zeros((args.max_nrof_epochs,), np.float32),
                 'time_validate': np.zeros((args.max_nrof_epochs,), np.float32),
@@ -257,7 +261,7 @@ def main(args):
 
                 print('Saving statistics')
                 with h5py.File(stat_file_name, 'w') as f:
-                    for key, value in stat.iteritems():
+                    for key, value in stat.items():
                         f.create_dataset(key, data=value)
     
     return model_dir
@@ -437,22 +441,26 @@ def evaluate(sess, enqueue_op, image_paths_placeholder, labels_placeholder, phas
         embeddings = emb_array
 
     assert np.array_equal(lab_array, np.arange(nrof_images))==True, 'Wrong labels used for evaluation, possibly caused by training examples left in the input pipeline'
-    _, _, accuracy, val, val_std, far = lfw.evaluate(embeddings, actual_issame, nrof_folds=nrof_folds, distance_metric=distance_metric, subtract_mean=subtract_mean)
+    _, _, accuracy, val2, val_std2, far2, val3, val_std3, far3 = lfw.evaluate(embeddings, actual_issame, nrof_folds=nrof_folds, distance_metric=distance_metric, subtract_mean=subtract_mean)
     
-    print('Accuracy: %2.5f+-%2.5f' % (np.mean(accuracy), np.std(accuracy)))
-    print('Validation rate: %2.5f+-%2.5f @ FAR=%2.5f' % (val, val_std, far))
+    print('Accuracy: %1.3f+-%1.3f' % (np.mean(accuracy), np.std(accuracy)))
+    print('Validation rate: %2.5f+-%2.5f @ FAR=%2.5f' % (val2, val_std2, far2))
+    print('Validation rate: %2.5f+-%2.5f @ FAR=%2.5f' % (val3, val_std3, far3))
+    
     lfw_time = time.time() - start_time
     # Add validation loss and accuracy to summary
     summary = tf.Summary()
     #pylint: disable=maybe-no-member
     summary.value.add(tag='lfw/accuracy', simple_value=np.mean(accuracy))
-    summary.value.add(tag='lfw/val_rate', simple_value=val)
+    summary.value.add(tag='lfw/val_rate2', simple_value=val2)
+    summary.value.add(tag='lfw/val_rate3', simple_value=val3)
     summary.value.add(tag='time/lfw', simple_value=lfw_time)
     summary_writer.add_summary(summary, step)
     with open(os.path.join(log_dir,'lfw_result.txt'),'at') as f:
-        f.write('%d\t%.5f\t%.5f\n' % (step, np.mean(accuracy), val))
+        f.write('%d\t%.5f\t%.5f\t%.5f\n' % (step, np.mean(accuracy), val2, val3))
     stat['lfw_accuracy'][epoch-1] = np.mean(accuracy)
-    stat['lfw_valrate'][epoch-1] = val
+    stat['lfw_valrate2'][epoch-1] = val2
+    stat['lfw_valrate3'][epoch-1] = val3
 
 def save_variables_and_metagraph(sess, saver, summary_writer, model_dir, model_name, step):
     # Save the model checkpoint
@@ -500,7 +508,7 @@ def parse_arguments(argv):
     parser.add_argument('--image_size', type=int,
         help='Image size (height, width) in pixels.', default=160)
     parser.add_argument('--epoch_size', type=int,
-        help='Number of batches per epoch.', default=1000)
+        help='Number of batches per epoch.', default=3860)
     parser.add_argument('--embedding_size', type=int,
         help='Dimensionality of the embedding.', default=128)
     parser.add_argument('--random_crop', 

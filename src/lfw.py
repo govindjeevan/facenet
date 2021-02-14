@@ -39,9 +39,10 @@ def evaluate(embeddings, actual_issame, nrof_folds=10, distance_metric=0, subtra
     tpr, fpr, accuracy = facenet.calculate_roc(thresholds, embeddings1, embeddings2,
         np.asarray(actual_issame), nrof_folds=nrof_folds, distance_metric=distance_metric, subtract_mean=subtract_mean)
     thresholds = np.arange(0, 4, 0.001)
-    val, val_std, far = facenet.calculate_val(thresholds, embeddings1, embeddings2,
-        np.asarray(actual_issame), 1e-3, nrof_folds=nrof_folds, distance_metric=distance_metric, subtract_mean=subtract_mean)
-    return tpr, fpr, accuracy, val, val_std, far
+    val2, val_std2, far2 = facenet.calculate_val(thresholds, embeddings1, embeddings2, np.asarray(actual_issame), 1e-2, nrof_folds=nrof_folds, distance_metric=distance_metric, subtract_mean=subtract_mean)
+    val3, val_std3, far3 = facenet.calculate_val(thresholds, embeddings1, embeddings2, np.asarray(actual_issame), 1e-3, nrof_folds=nrof_folds, distance_metric=distance_metric, subtract_mean=subtract_mean)
+    
+    return tpr, fpr, accuracy, val2, val_std2, far2, val3, val_std3, far3
 
 def get_paths(lfw_dir, pairs):
     nrof_skipped_pairs = 0

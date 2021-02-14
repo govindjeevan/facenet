@@ -47,7 +47,7 @@ def main(args):
   
     network = importlib.import_module(args.model_def)
 
-    subdir = datetime.strftime(datetime.now(), '%Y%m%d-%H%M%S')
+    subdir = datetime.strftime(datetime.now(), '%Y-%m-%d-%H-triplet-'+args.model_def.split(".")[-1]+"-"+args.data_dir.split("/")[-1])
     log_dir = os.path.join(os.path.expanduser(args.logs_base_dir), subdir)
     if not os.path.isdir(log_dir):  # Create the log directory if it doesn't exist
         os.makedirs(log_dir)
@@ -172,7 +172,17 @@ def main(args):
 
             if args.pretrained_model:
                 print('Restoring pretrained model: %s' % args.pretrained_model)
-                saver.restore(sess, os.path.expanduser(args.pretrained_model))
+                
+                meta_file, ckpt_file = facenet.get_model_filenames(args.pretrained_model)
+        
+                print('Metagraph file: %s' % meta_file)
+                print('Checkpoint file: %s' % ckpt_file)
+
+                saver = tf.train.import_meta_graph(os.path.join(args.pretrained_model, meta_file))
+                ckpt = tf.train.get_checkpoint_state(args.pretrained_model)
+                if ckpt and ckpt.model_checkpoint_path:
+                    print(ckpt.model_checkpoint_path)
+                    saver.restore(sess, ckpt.model_checkpoint_path)
 
             # Training and validation loop
             epoch = 0
@@ -231,8 +241,7 @@ def train(args, sess, dataset, epoch, image_paths_placeholder, labels_placeholde
         triplets, nrof_random_negs, nrof_triplets = select_triplets(emb_array, num_per_class, 
             image_paths, args.people_per_batch, args.alpha)
         selection_time = time.time() - start_time
-        print('(nrof_random_negs, nrof_triplets) = (%d, %d): time=%.3f seconds' % 
-            (nrof_random_negs, nrof_triplets, selection_time))
+        #print('(nrof_random_negs, nrof_triplets) = (%d, %d): time=%.3f seconds' % (nrof_random_negs, nrof_triplets, selection_time))
 
         # Perform training on the selected triplets
         nrof_batches = int(np.ceil(nrof_triplets*3/args.batch_size))
@@ -255,8 +264,8 @@ def train(args, sess, dataset, epoch, image_paths_placeholder, labels_placeholde
             emb_array[lab,:] = emb
             loss_array[i] = err
             duration = time.time() - start_time
-            print('Epoch: [%d][%d/%d]\tTime %.3f\tLoss %2.3f' %
-                  (epoch, batch_number+1, args.epoch_size, duration, err))
+            print('Epoch: [%d][%d/%d]\tTime %.3f\tLoss %2.3f\tlr %f' %
+                  (epoch, batch_number+1, args.epoch_size, duration, err, lr))
             batch_number += 1
             i += 1
             train_time += duration
@@ -299,8 +308,7 @@ def select_triplets(embeddings, nrof_images_per_class, image_paths, people_per_b
                     rnd_idx = np.random.randint(nrof_random_negs)
                     n_idx = all_neg[rnd_idx]
                     triplets.append((image_paths[a_idx], image_paths[p_idx], image_paths[n_idx]))
-                    #print('Triplet %d: (%d, %d, %d), pos_dist=%2.6f, neg_dist=%2.6f (%d, %d, %d, %d, %d)' % 
-                    #    (trip_idx, a_idx, p_idx, n_idx, pos_dist_sqr, neg_dists_sqr[n_idx], nrof_random_negs, rnd_idx, i, j, emb_start_idx))
+                    #print('Triplet %d: (%d, %d, %d), pos_dist=%2.6f, neg_dist=%2.6f (%d, %d, %d, %d, %d)' % (trip_idx, a_idx, p_idx, n_idx, pos_dist_sqr, neg_dists_sqr[n_idx], nrof_random_negs, rnd_idx, i, j, emb_start_idx))
                     trip_idx += 1
 
                 num_trips += 1
@@ -363,20 +371,22 @@ def evaluate(sess, image_paths, embeddings, labels_batch, image_paths_placeholde
     
     assert(np.all(label_check_array==1))
     
-    _, _, accuracy, val, val_std, far = lfw.evaluate(emb_array, actual_issame, nrof_folds=nrof_folds)
+    _, _, accuracy, val2, val_std2, far2, val3, val_std3, far3 = lfw.evaluate(emb_array, actual_issame, nrof_folds=nrof_folds)
     
     print('Accuracy: %1.3f+-%1.3f' % (np.mean(accuracy), np.std(accuracy)))
-    print('Validation rate: %2.5f+-%2.5f @ FAR=%2.5f' % (val, val_std, far))
+    print('Validation rate: %2.5f+-%2.5f @ FAR=%2.5f' % (val2, val_std2, far2))
+    print('Validation rate: %2.5f+-%2.5f @ FAR=%2.5f' % (val3, val_std3, far3))
     lfw_time = time.time() - start_time
     # Add validation loss and accuracy to summary
     summary = tf.Summary()
     #pylint: disable=maybe-no-member
     summary.value.add(tag='lfw/accuracy', simple_value=np.mean(accuracy))
-    summary.value.add(tag='lfw/val_rate', simple_value=val)
+    summary.value.add(tag='lfw/val_rate2', simple_value=val2)
+    summary.value.add(tag='lfw/val_rate3', simple_value=val3)
     summary.value.add(tag='time/lfw', simple_value=lfw_time)
     summary_writer.add_summary(summary, step)
     with open(os.path.join(log_dir,'lfw_result.txt'),'at') as f:
-        f.write('%d\t%.5f\t%.5f\n' % (step, np.mean(accuracy), val))
+        f.write('%d\t%.5f\t%.5f\t%.5f\n' % (step, np.mean(accuracy), val2, val3))
 
 def save_variables_and_metagraph(sess, saver, summary_writer, model_dir, model_name, step):
     # Save the model checkpoint
@@ -460,7 +470,7 @@ def parse_arguments(argv):
         help='The optimization algorithm to use', default='ADAGRAD')
     parser.add_argument('--learning_rate', type=float,
         help='Initial learning rate. If set to a negative value a learning rate ' +
-        'schedule can be specified in the file "learning_rate_schedule.txt"', default=0.1)
+        'schedule can be specified in the file "learning_rate_schedule.txt"', default=0.0)
     parser.add_argument('--learning_rate_decay_epochs', type=int,
         help='Number of epochs between learning rate decay.', default=100)
     parser.add_argument('--learning_rate_decay_factor', type=float,
@@ -470,7 +480,7 @@ def parse_arguments(argv):
     parser.add_argument('--seed', type=int,
         help='Random seed.', default=666)
     parser.add_argument('--learning_rate_schedule_file', type=str,
-        help='File containing the learning rate schedule that is used when learning_rate is set to to -1.', default='data/learning_rate_schedule.txt')
+        help='File containing the learning rate schedule that is used when learning_rate is set to to -1.', default='data/learning_rate_schedule_classifier_casia.txt')
 
     # Parameters for validation on LFW
     parser.add_argument('--lfw_pairs', type=str,
